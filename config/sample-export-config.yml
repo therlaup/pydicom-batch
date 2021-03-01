@@ -1,0 +1,32 @@
+pacs:
+  hostname: 172.20.112.1
+  port: 4242
+  aet: ORTHANC
+local:
+  port: 4000
+  aet: SAMPLE_AE
+request:
+  type: c-find
+  model: patient
+  remove_batch_duplicates: True
+  elements_batch_file: ./config/sample_batch.csv
+  elements:
+    - PatientID=02004950
+    - PatientName
+    - Date
+    - StudyTime
+    - StudyDate
+    - AccessionNumber
+    - StudyInstanceUID
+    - QueryRetrieveLevel=SERIES
+    - ModalitiesInStudy
+    - (0020,1208)
+    - (0020,1206)
+    - (0008,1030)
+    - (0008,103E)
+output:
+  directory: ./data/dicom 
+  library_file: library.csv
+  directory_structure: PatientID/StudyInstanceUID/
+
+  

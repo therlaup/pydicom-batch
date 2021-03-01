@@ -1,0 +1,14 @@
+name: dicom-batch-export
+
+channels:
+  - conda-forge
+  - anaconda
+  
+dependencies:
+  - nomkl
+  - pydicom 
+  - pynetdicom
+  - gdcm 
+  - pillow
+  - numpy
+  - pyyaml
