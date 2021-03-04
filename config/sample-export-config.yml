@@ -9,7 +9,7 @@ request:
   type: c-find
   model: patient
   remove_batch_duplicates: True
-  elements_batch_file: ./config/sample_batch.csv
+  elements_batch_file: ./config/batch.csv
   elements:
     - PatientID=02004950
     - PatientName

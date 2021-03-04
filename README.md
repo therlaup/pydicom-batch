@@ -89,7 +89,8 @@ request:
   type: c-find                      # The type of operation to process: c-find or c-move
   model: patient                    # The query/retrieve information model: patient or study
   elements_batch_file: ./config/sample_batch.csv # File path of the batch of elements ot process. If omitted, a single c-find is processed.
-  elements:                         # Elements common to the entire batch in format 'keyword=value'
+  elements:                         # Elements common to the entire batch in format 'keyword=value', 
+                                    # these elements will be included in the output data of a c-find
     - PatientID=02004950
     - PatientName
     - Date
