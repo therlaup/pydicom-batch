@@ -5,6 +5,10 @@ from pydicom.dataset import Dataset
 from .common import setup_logging
 import os.path
 import csv
+import time
+import tqdm
+import concurrent.futures
+import numpy as np
 
 from pydicom.uid import (
     ExplicitVRLittleEndian, ImplicitVRLittleEndian, ExplicitVRBigEndian,
@@ -22,135 +26,31 @@ from pynetdicom import (
 from pynetdicom._globals import DEFAULT_MAX_LENGTH
 from pynetdicom.pdu_primitives import SOPClassExtendedNegotiation
 from pynetdicom.sop_class import (
-    ModalityWorklistInformationFind,
     PatientRootQueryRetrieveInformationModelFind,
     StudyRootQueryRetrieveInformationModelFind,
     PatientStudyOnlyQueryRetrieveInformationModelFind,
+    PatientRootQueryRetrieveInformationModelMove,
+    StudyRootQueryRetrieveInformationModelMove,
+    PatientStudyOnlyQueryRetrieveInformationModelMove
 )
 
-def create_dataset(config):
-    ds = Dataset()
-    try:
-        elements = [ElementPath(path) for path in config['request']['elements']]
-        for elem in elements:
-            ds = elem.update(ds)
-    except Exception as exc:
-        if logger:
-            logger.error(
-                'Exception raised trying to parse the supplied keywords'
-            )
-        raise exc
-    return ds
+APP_LOGGER = setup_logging('scu')
+APP_LOGGER.debug(f'pydicombatch scu')
 
-
-def send_echo(config):
-    # Initialise the Application Entity
-    ae = AE(ae_title='SAMPLE_AE')
-    ae.add_requested_context(VerificationSOPClass)
-
-    # Associate with peer AE
-    assoc = ae.associate(config['pacs']['hostname'], 
-        config['pacs']['port'],  
-        ae_title=config['pacs']['aet'])
-
-    if assoc.is_established:
-        # Use the C-ECHO service to send the request
-        # returns the response status a pydicom Dataset
-        status = assoc.send_c_echo()
-
-        # Check the status of the verification request
-        if status:
-            # If the verification request succeeded this will be 0x0000
-            print('C-ECHO request status: 0x{0:04x}'.format(status.Status))
-        else:
-            print('Connection timed out, was aborted or received invalid response')
-
-        # Release the association
-        assoc.release()
-    else:
-        print('Association rejected, aborted or never connected')
-
-def send_find(config):
-    APP_LOGGER = setup_logging('findscu')
-    # Create query (identifier) dataset
-    try:
-        # If you're looking at this to see how QR Find works then `identifer`
-        # is a pydicom Dataset instance with your query keys, e.g.:
-        #     identifier = Dataset()
-        #     identifier.QueryRetrieveLevel = 'PATIENT'
-        #     identifier.PatientName = ''
-        identifier = create_dataset(config)
-    except Exception as exc:
-        APP_LOGGER.exception(exc)
-        raise exc
-        sys.exit(1)
-
-    keywords = [ElementPath(path).keyword for path in config['request']['elements']]
-
-    # Create application entity
-    # Binding to port 0 lets the OS pick an available port
-    ae = AE(ae_title='SAMPLE_AE')
-
-    # Set timeouts
-    ae.acse_timeout = 30
-    ae.dimse_timeout = 30
-    ae.network_timeout = 30
-
-    # Set the Presentation Contexts we are requesting the Find SCP support
-    ae.requested_contexts = (
-        QueryRetrievePresentationContexts
-        + BasicWorklistManagementPresentationContexts
-    )
-
-    # Query/Retrieve Information Models
-    if config['request']['model'] == 'worklist':
-        query_model = ModalityWorklistInformationFind
-    elif config['request']['model'] == 'study':
-        query_model = StudyRootQueryRetrieveInformationModelFind
-    elif config['request']['model'] == 'psonly':
-        query_model = PatientStudyOnlyQueryRetrieveInformationModelFind
-    else:
-        query_model = PatientRootQueryRetrieveInformationModelFind
-
-    
-    # Request association with (QR/BWM) Find SCP
-
-    assoc = ae.associate(config['pacs']['hostname'], 
-        config['pacs']['port'],  
-        ae_title=config['pacs']['aet'],
-        max_pdu=16382)
-
-    if assoc.is_established:
-        # Send C-FIND request, `responses` is a generator
-   
-        responses = assoc.send_c_find(identifier, query_model)
-        # Used to generate filenames if args.write used
-        
-        for (status, rsp_identifier) in responses:
-            # If `status.Status` is one of the 'Pending' statuses then
-            #   `rsp_identifier` is the C-FIND response's Identifier dataset
-
-            if status and status.Status in [0xFF00, 0xFF01]:
-                dataset_to_csv(rsp_identifier, config['output']['library_file'], keywords)
-
-        # Release the association
-        assoc.release()
-
-def dataset_to_csv(ds, filename, fieldnames):
+def dataset_to_csv(ds, filepath, fieldnames):
     write_dict = {}
     for key in fieldnames:
         write_dict[key] = str(ds[key].value)
 
-    if os.path.exists(filename):
-        with open(filename, 'a', newline='', ) as csvfile:
+    if os.path.exists(filepath):
+        with open(filepath, 'a', newline='', ) as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames, dialect='excel')
             writer.writerow(write_dict)
     else:
-        with open(filename, 'w', newline='') as csvfile:
+        with open(filepath, 'w', newline='') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames, dialect='excel')
             writer.writeheader()
             writer.writerow(write_dict)
-
 
 def add_element_to_list(element_list, key, value):
     if [x if ((x.partition('=')[0] == key) or (x == key)) else None for x in element_list]:
@@ -159,17 +59,200 @@ def add_element_to_list(element_list, key, value):
         element_list.append(f'{key}={value}')
         return element_list
 
-def send_batch_find(config):
-    if (os.path.exists(config['request']['elements_batch_file'])):
-        with open(config['request']['elements_batch_file'], newline='') as csvfile:
-            reader = csv.DictReader(csvfile, dialect='excel')
-            for row in reader:
-                row_config = config.copy()
-                for key in row:
-                    row_config['request']['elements'] = add_element_to_list(row_config['request']['elements'], key, row[key])
-                
-                elements = [ElementPath(path) for path in config['request']['elements']]
-                
-                send_find(row_config)
+def create_dataset(request):
+    ds = Dataset()
+    try:
+        elements = [ElementPath(path) for path in request['elements']]
+        for elem in elements:
+            ds = elem.update(ds)
+    except Exception as exc:
+        if APP_LOGGER:
+            APP_LOGGER.error(
+                'Exception raised trying to parse the supplied keywords'
+            )
+        raise exc
+    return ds
+
+def create_requests(request):
+    requests = []
+    if request['elements_batch_file']:
+        if os.path.exists(request['elements_batch_file']):
+            with open(request['elements_batch_file'], newline='') as csvfile:
+                reader = csv.DictReader(csvfile, dialect='excel')
+                for row in reader:
+                    row_request = request.copy()
+                    for key in row:
+                        row_request['elements'] = add_element_to_list(row_request['elements'], key, row[key])
+                    requests.append(row_request)
+        else:
+            requests.append(request)
     else:
-        print('Supplied elements_batch_file does not exist: ', config['request']['elements_batch_file'])
+        requests.append(request)
+    return requests
+
+def thread_scu_function(config, pbar, requests):
+    scu = SCU(config)
+    scu.pbar = pbar
+    scu.process_requests_batch(list(requests))
+    return
+
+def process_request_batch(config):
+    requests = create_requests(config['request'])
+    split_requests = np.array_split(requests, config['request']['threads'])
+    pbar = tqdm.tqdm(total=len(requests), 
+        desc='Sending {} requests '.format(config['request']['type']), 
+        unit='rqst')
+    fn = lambda x : thread_scu_function(config, pbar, x)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=config['request']['threads']) as executor:
+        executor.map(fn, split_requests)    
+
+
+class SCU(object):
+    """ SCU class
+    This class is used to send batches of DIMSE requests (c-find, c-echo, c-move) to a remote SCP
+    """
+    def __init__(self, config):
+        self.config = config
+        self.ae = self.create_ae()
+        self.query_model = self.create_query_model()
+        self.pbar = None
+        
+    def create_ae(self):
+        # Create application entity
+        ae = AE(ae_title=self.config['local']['aet'])
+
+        # Set timeouts
+        ae.acse_timeout = 300
+        ae.dimse_timeout = 300
+        ae.network_timeout = 300
+
+        # Set the Presentation Contexts we are requesting the Find SCP support
+        if self.config['request']['type'].lower() == 'c-find':
+            ae.requested_contexts = QueryRetrievePresentationContexts
+                
+        elif self.config['request']['type'].lower() == 'c-echo':
+            ae.requested_contexts = [VerificationSOPClass]
+
+        elif self.config['request']['type'].lower() == 'c-move':
+            ae.requested_contexts = QueryRetrievePresentationContexts
+
+        return ae
+
+    def establish_association(self):
+        return self.ae.associate(self.config['pacs']['hostname'], 
+            self.config['pacs']['port'],  
+            ae_title=self.config['pacs']['aet'],
+            max_pdu=16382)
+
+    def retry_association(self):
+
+        for i in range(100):
+            if not self.association.is_established:
+                time.sleep(1)
+                self.association = self.establish_association()
+            else:
+                return
+        
+        sys.exit(1)
+
+
+    def create_query_model(self):
+        request = self.config['request']
+        query_model = None
+        if request['type'].lower() == 'c-find':
+            if request['model'] == 'study':
+                query_model = StudyRootQueryRetrieveInformationModelFind
+            elif self.config['request']['model'] == 'psonly':
+                query_model = PatientStudyOnlyQueryRetrieveInformationModelFind
+            else:
+                query_model = PatientRootQueryRetrieveInformationModelFind
+        elif request['type'].lower() == 'c-move':
+            if request['model'] == 'study':
+                query_model = StudyRootQueryRetrieveInformationModelMove
+            elif self.config['request']['model'] == 'psonly':
+                query_model = PatientStudyOnlyQueryRetrieveInformationModelMove
+            else:
+                query_model = PatientRootQueryRetrieveInformationModelMove
+        return query_model
+
+    def process_requests_batch(self, requests):
+        self.association = self.establish_association()
+        for request in requests:
+            self.process_request(request)
+            time.sleep(request['throttle_time'])
+        self.association.release()
+        
+    
+    def process_request(self, request):
+        if request['type'].lower() == 'c-find':
+            self.send_find(request)
+        if request['type'].lower() == 'c-move':
+            self.send_move(request)
+    
+    
+    # def send_batch_find(self, request):
+    #     if (os.path.exists(request['elements_batch_file'])):
+    #         with open(request['elements_batch_file'], newline='') as csvfile:
+    #             reader = csv.DictReader(csvfile, dialect='excel')
+    #             for row in tqdm(list(reader), unit='request'):
+    #                 time.sleep(request['throttle_time'])
+    #                 row_request = request.copy()
+
+    #                 for key in row:
+    #                     row_request['elements'] = add_element_to_list(row_request['elements'], key, row[key])
+                                        
+    #                 self.send_find(row_request)
+    #     else:
+    #         print('Supplied elements_batch_file does not exist: ', request['elements_batch_file'])
+
+    def send_find(self, request):
+        
+        identifier = create_dataset(request)
+    
+        keywords = [ElementPath(path).keyword for path in request['elements']]
+
+        if not self.association.is_established:
+            self.retry_association()
+        
+        if self.association.is_established:
+            responses = self.association.send_c_find(identifier, self.query_model)
+                    
+            for (status, rsp_identifier) in responses:
+
+                if status and status.Status in [0xFF00, 0xFF01]:
+                    path = os.path.join(self.config['output']['directory'], self.config['output']['database_file'])
+                    dataset_to_csv(rsp_identifier, path, keywords)
+                elif status and status.Status in [0x0000]:
+                    if self.pbar:
+                        self.pbar.update(1)
+
+
+
+    def send_move(self, request):
+        
+        identifier = create_dataset(request)
+    
+        keywords = [ElementPath(path).keyword for path in request['elements']]
+
+        if not self.association.is_established:
+            self.retry_association()
+        
+        if self.association.is_established:
+            responses = self.association.send_c_move(identifier, self.config['local']['aet'], self.query_model)
+                   
+            for (status, rsp_identifier) in responses:
+                
+                if status and status.Status in [0xFF00]:
+                    # Status pending
+                    pass
+                else:
+                    # Status Success Warning, Cancel, Failure
+                    if self.pbar:
+                        self.pbar.update(1)
+                    identifier.Status = hex(status.Status)
+                    keywords.append('Status')
+                    path = os.path.join(self.config['output']['directory'], self.config['output']['database_file'])
+                    dataset_to_csv(identifier, path, keywords)
+
+                    
+

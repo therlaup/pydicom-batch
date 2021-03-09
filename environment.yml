@@ -1,4 +1,4 @@
-name: dicom-batch-export
+name: pydicom-batch
 
 channels:
   - conda-forge
@@ -12,3 +12,4 @@ dependencies:
   - pillow
   - numpy
   - pyyaml
+  - tqdm

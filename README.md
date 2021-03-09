@@ -28,7 +28,7 @@ cd DICOM-batch-export
 ./bin/build-docker-container.sh
 ```
 
-After the build is complete, you will have an image called ``dicom-batch-export`` available.
+After the build is complete, you will have an image called ``dicom-batch-query`` available.
 
 ### Option 2: Anaconda installation
 
@@ -109,6 +109,8 @@ output:
   directory: ./data/dicom           # Directoty in which to store DICOM files transfered using c-move 
   directory_structure: PatientID/StudyInstanceUID/  # Directory structure generated in the output directory
 ```
+
+The 
 
 ## Under development
 We will soon be adding the abtch C-MOVE functionality.
