@@ -13,3 +13,4 @@ dependencies:
   - numpy
   - pyyaml
   - tqdm
+  - inquirer

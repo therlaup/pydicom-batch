@@ -1,31 +1,22 @@
-import logging
+import yaml
+from .scu import process_request_batch
+from .scp import SCP
+import os
 
-def setup_logging(app_name):
-    """Return the application logger.
-    Parameters
-    ----------
-    app_name : str
-        The name of the application.
-    Returns
-    -------
-    logger : logging.Logger, optional
-        The logger to use for logging.
-    """
-    formatter = logging.Formatter('%(levelname).1s: %(message)s')
+def pydicombatch(config_file):
+    with open(config_file) as file:
+        config = yaml.load(file, Loader=yaml.FullLoader)
 
-    # Setup pynetdicom library's logging
-    pynd_logger = logging.getLogger('pynetdicom')
-    handler = logging.StreamHandler()
-    handler.setFormatter(formatter)
-    pynd_logger.addHandler(handler)
-    pynd_logger.setLevel(logging.ERROR)
+        print('Running extraction defined in: ', config_file)
 
-    # Setup application's logging
-    app_logger = logging.Logger(app_name)
-    handler = logging.StreamHandler()
-    handler.setFormatter(formatter)
-    app_logger.addHandler(handler)
-    app_logger.setLevel(logging.ERROR)
-    pynd_logger.setLevel(logging.ERROR)
+        if config['request']['type'].lower() == 'c-move':
+            scp = SCP(config)
+            scp.start_server()
+        process_request_batch(config)
 
-    return app_logger
+        if config['request']['type'].lower() == 'c-move':
+            scp.stop_server()
+
+        filepath_requests_failed = os.path.join(config['output']['directory'], 'requests.failed')
+        if os.path.exists(filepath_requests_failed):
+            print('Failed requests detected. To re-try failed request, re-run batch request.')

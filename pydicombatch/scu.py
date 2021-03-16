@@ -2,13 +2,14 @@ from pynetdicom import AE
 from pynetdicom.sop_class import VerificationSOPClass
 from pynetdicom.apps.common import ElementPath
 from pydicom.dataset import Dataset
-from .common import setup_logging
 import os.path
 import csv
 import time
 import tqdm
 import concurrent.futures
 import numpy as np
+import inquirer
+import ast
 
 from pydicom.uid import (
     ExplicitVRLittleEndian, ImplicitVRLittleEndian, ExplicitVRBigEndian,
@@ -34,21 +35,37 @@ from pynetdicom.sop_class import (
     PatientStudyOnlyQueryRetrieveInformationModelMove
 )
 
-APP_LOGGER = setup_logging('scu')
-APP_LOGGER.debug(f'pydicombatch scu')
+
+class hashabledict(dict):
+    def __hash__(self):
+        return hash(tuple(sorted(self.items())))
 
 def dataset_to_csv(ds, filepath, fieldnames):
     write_dict = {}
     for key in fieldnames:
         write_dict[key] = str(ds[key].value)
 
+    dict_to_csv(write_dict, filepath, fieldnames)
+
+def request_from_csv(filepath):
+    if os.path.exists(filepath):
+        with open(filepath, 'r') as csvfile:
+            reader = csv.DictReader(csvfile)
+            rows = []
+            for row in reader:
+                rows.append(hashabledict(row))
+        return rows
+    else:
+        return []
+
+def dict_to_csv(write_dict, filepath, fieldnames):
     if os.path.exists(filepath):
         with open(filepath, 'a', newline='', ) as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames, dialect='excel')
+            writer = csv.DictWriter(csvfile, fieldnames=sorted(fieldnames), dialect='excel')
             writer.writerow(write_dict)
     else:
         with open(filepath, 'w', newline='') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames, dialect='excel')
+            writer = csv.DictWriter(csvfile, fieldnames=sorted(fieldnames), dialect='excel')
             writer.writeheader()
             writer.writerow(write_dict)
 
@@ -66,28 +83,108 @@ def create_dataset(request):
         for elem in elements:
             ds = elem.update(ds)
     except Exception as exc:
-        if APP_LOGGER:
-            APP_LOGGER.error(
-                'Exception raised trying to parse the supplied keywords'
-            )
         raise exc
     return ds
 
-def create_requests(request):
+def create_requests(config):
     requests = []
-    if request['elements_batch_file']:
-        if os.path.exists(request['elements_batch_file']):
-            with open(request['elements_batch_file'], newline='') as csvfile:
+    if config['request']['elements_batch_file']:
+        if os.path.exists(config['request']['elements_batch_file']):
+            with open(config['request']['elements_batch_file'], newline='') as csvfile:
                 reader = csv.DictReader(csvfile, dialect='excel')
                 for row in reader:
-                    row_request = request.copy()
+                    row_request = config['request'].copy()
                     for key in row:
                         row_request['elements'] = add_element_to_list(row_request['elements'], key, row[key])
+                    row_request['elements'] = sorted(row_request['elements'])
                     requests.append(row_request)
         else:
-            requests.append(request)
+            requests.append(config['request'])
     else:
-        requests.append(request)
+        requests.append(config['request'])
+
+    
+    filepath_requests = os.path.join(config['output']['directory'], 'requests.whole')
+    filepath_requests_completed = os.path.join(config['output']['directory'], 'requests.completed')
+    filepath_requests_failed = os.path.join(config['output']['directory'], 'requests.failed')
+    if os.path.exists(filepath_requests):
+        os.remove(filepath_requests)
+    if os.path.exists(filepath_requests_completed):
+        os.remove(filepath_requests_completed)
+    if os.path.exists(filepath_requests_failed):
+        os.remove(filepath_requests_failed)
+
+    for request in requests:
+        dict_to_csv(request, filepath_requests, request.keys())
+
+    return requests
+
+def pending_requests(config):
+    """
+    Returns pending requests to enable resuming
+    """
+    filepath_requests = os.path.join(config['output']['directory'], 'requests.whole')
+    filepath_requests_completed = os.path.join(config['output']['directory'], 'requests.completed')
+
+    reqs1 = request_from_csv(filepath_requests)
+    reqs2 = []
+    if os.path.isfile(filepath_requests_completed):
+        reqs2 = request_from_csv(filepath_requests_completed)
+
+    requests = list(set(reqs1) - set(reqs2))
+    for request in requests:
+        request['elements'] = list(sorted(ast.literal_eval(request['elements'])))
+        request['throttle_time'] = float(request['throttle_time'])
+        request['threads'] = int(request['threads'])
+    
+    questions = []
+    if requests:
+        questions = [
+        inquirer.List('resume',
+                        message="A partial extraction was detected. Do you want to resume or overwrite?",
+                        choices=['Resume', 'Overwrite'],
+                    ),
+        ]
+    else:
+        questions = [
+        inquirer.List('resume',
+                        message="A completed extraction was detected. Do you want to overwrite?",
+                        choices=['Cancel', 'Overwrite'],
+                    ),
+        ]
+
+    answers = inquirer.prompt(questions)
+    if answers['resume'] == 'Overwrite':
+        requests = create_requests(config)
+    return requests
+
+def failed_requests(config):
+    """
+    Returns failed requests to enable re-trying
+    """
+    filepath_requests_failed = os.path.join(config['output']['directory'], 'requests.failed')
+
+    questions = [
+    inquirer.List('failed',
+                    message="Failed requests from a previous extraction were detected. Do you want to re-try the failed requests?",
+                    choices=['Re-try failed requests', 'Remove failed requests'],
+                ),
+    ]
+    answers = inquirer.prompt(questions)
+
+    requests = []
+    if answers['failed'] == 'Remove failed requests':
+        requests = pending_requests(config)
+    else:
+        reqs1 = request_from_csv(filepath_requests_failed)
+        requests = list(set(reqs1))
+        for request in requests:
+            request['elements'] = list(sorted(ast.literal_eval(request['elements'])))
+            request['throttle_time'] = float(request['throttle_time'])
+            request['threads'] = int(request['threads'])
+    
+    os.remove(filepath_requests_failed)
+    
     return requests
 
 def thread_scu_function(config, pbar, requests):
@@ -97,14 +194,37 @@ def thread_scu_function(config, pbar, requests):
     return
 
 def process_request_batch(config):
-    requests = create_requests(config['request'])
-    split_requests = np.array_split(requests, config['request']['threads'])
-    pbar = tqdm.tqdm(total=len(requests), 
-        desc='Sending {} requests '.format(config['request']['type']), 
-        unit='rqst')
-    fn = lambda x : thread_scu_function(config, pbar, x)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=config['request']['threads']) as executor:
-        executor.map(fn, split_requests)    
+
+    requests = []
+    filepath_requests = os.path.join(config['output']['directory'], 'requests.whole')
+    filepath_requests_completed = os.path.join(config['output']['directory'], 'requests.completed')
+    filepath_requests_failed = os.path.join(config['output']['directory'], 'requests.failed')
+
+    if (os.path.isfile(filepath_requests)):
+        # Previous extraction detected
+        if os.path.isfile(filepath_requests_failed):
+            # Failed requests detected
+            requests = failed_requests(config)
+        else:
+            # No failed requests detected, return pending requests
+            requests = pending_requests(config)
+    else:
+        # No previous extraction detected
+        requests = create_requests(config)
+    
+    if requests:
+        split_requests = np.array_split(requests, config['request']['threads'])
+        pbar = tqdm.tqdm(total=len(requests), 
+            desc='Sending {} requests '.format(config['request']['type']), 
+            unit='rqst')
+        fn = lambda x : thread_scu_function(config, pbar, x)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=config['request']['threads']) as executor:
+            executor.map(fn, split_requests)
+        pbar.close()
+    else:
+        print('No further requests pending')
+        
+    
 
 
 class SCU(object):
@@ -188,23 +308,9 @@ class SCU(object):
             self.send_find(request)
         if request['type'].lower() == 'c-move':
             self.send_move(request)
+        return
     
     
-    # def send_batch_find(self, request):
-    #     if (os.path.exists(request['elements_batch_file'])):
-    #         with open(request['elements_batch_file'], newline='') as csvfile:
-    #             reader = csv.DictReader(csvfile, dialect='excel')
-    #             for row in tqdm(list(reader), unit='request'):
-    #                 time.sleep(request['throttle_time'])
-    #                 row_request = request.copy()
-
-    #                 for key in row:
-    #                     row_request['elements'] = add_element_to_list(row_request['elements'], key, row[key])
-                                        
-    #                 self.send_find(row_request)
-    #     else:
-    #         print('Supplied elements_batch_file does not exist: ', request['elements_batch_file'])
-
     def send_find(self, request):
         
         identifier = create_dataset(request)
@@ -220,13 +326,21 @@ class SCU(object):
             for (status, rsp_identifier) in responses:
 
                 if status and status.Status in [0xFF00, 0xFF01]:
+                    # Status pending
                     path = os.path.join(self.config['output']['directory'], self.config['output']['database_file'])
                     dataset_to_csv(rsp_identifier, path, keywords)
-                elif status and status.Status in [0x0000]:
+                else:
                     if self.pbar:
                         self.pbar.update(1)
-
-
+                    # Status Success, Warning, Cancel, Failure
+                    if status.Status in [0x0000]:
+                        filepath_requests_completed = os.path.join(self.config['output']['directory'], 'requests.completed')
+                        dict_to_csv(request, filepath_requests_completed, request.keys())
+                    else:
+                        filepath_requests_failed = os.path.join(self.config['output']['directory'], 'requests.failed')
+                        dict_to_csv(request, filepath_requests_failed, request.keys())
+                
+                    
 
     def send_move(self, request):
         
@@ -246,13 +360,21 @@ class SCU(object):
                     # Status pending
                     pass
                 else:
-                    # Status Success Warning, Cancel, Failure
+                    # Status Success, Warning, Cancel, Failure
                     if self.pbar:
                         self.pbar.update(1)
                     identifier.Status = hex(status.Status)
                     keywords.append('Status')
                     path = os.path.join(self.config['output']['directory'], self.config['output']['database_file'])
                     dataset_to_csv(identifier, path, keywords)
+                    
+                    if status.Status in [0x0000]:
+                        filepath_requests_completed = os.path.join(self.config['output']['directory'], 'requests.completed')
+                        dict_to_csv(request, filepath_requests_completed, request.keys())
+                    else:
+                        filepath_requests_failed = os.path.join(self.config['output']['directory'], 'requests.failed')
+                        dict_to_csv(request, filepath_requests_failed, request.keys())
+                  
 
                     
 

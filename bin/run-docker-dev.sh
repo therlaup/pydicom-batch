@@ -35,8 +35,8 @@ config_file=$(realpath $1)
 paths=(
     $config_file
     $output_directory
-    $output_anonymization_script
-    $output_anonymization_lookup_table
+    $anonymization_script
+    $anonymization_lookup_table
     $output_database_file
     $request_elements_batch_file
     ./data
@@ -52,7 +52,6 @@ for path in "${paths[@]}" ; do
     fi
 done
 
-echo $volumes
 
 docker run -v $PWD/pydicombatch:/home/pydicom-batch/pydicombatch\
     -p $local_port:$local_port \

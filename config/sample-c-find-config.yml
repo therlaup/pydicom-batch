@@ -21,7 +21,7 @@ request:
     - StudyInstanceUID
     - SeriesInstanceUID
     - QueryRetrieveLevel=SERIES
-    - Modality=CR
+    - Modality
     - (0020,1208)
     - (0020,1206)
     - (0008,1030)
@@ -30,7 +30,7 @@ output:
   anonymization_script: /home/therlaup/DICOM-batch-export/config/sample-dicom-anonymizer.script
   anonymization_lookup_table: /home/therlaup/DICOM-batch-export/config/sample-lookup-table.properties
   directory: /home/therlaup/DICOM-batch-export/data
-  database_file: /home/therlaup/DICOM-batch-export/data/library.csv
+  database_file: /home/therlaup/DICOM-batch-export/data/database-c-find.csv
   directory_structure: PatientID/StudyInstanceUID/
 
   

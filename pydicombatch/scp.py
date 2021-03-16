@@ -1,12 +1,15 @@
 import os
 import sys
 import uuid
-from .common import setup_logging
-
+import time
 from queue import Queue
 from threading import Thread
-
+import tqdm
+from pydicom import dcmread
 from pydicom.dataset import Dataset
+from pynetdicom.apps.common import ElementPath
+import inquirer
+import shutil
 
 from pydicom.uid import (
     ExplicitVRLittleEndian,
@@ -33,128 +36,6 @@ from pynetdicom.sop_class import (
     PatientStudyOnlyQueryRetrieveInformationModelFind
 )
 
-APP_LOGGER = setup_logging(app_name='scp')
-APP_LOGGER.debug(f'pydicombatch storage server')
-
-
-
-
-# def handle_store(event, config, app_logger):
-#     """Handle a C-STORE request.
-#     Parameters
-#     ----------
-#     event : pynetdicom.event.event
-#         The event corresponding to a C-STORE request.
-#     config : 
-#         config data
-#     app_logger : logging.Logger
-#         The application's logger.
-#     Returns
-#     -------
-#     status : pynetdicom.sop_class.Status or int
-#         A valid return status code, see PS3.4 Annex B.2.3 or the
-#         ``StorageServiceClass`` implementation for the available statuses
-#     """
-
-#     try:
-#         ds = event.dataset
-#         # Remove any Group 0x0002 elements that may have been included
-#         ds = ds[0x00030000:]
-#     except Exception as exc:
-#         app_logger.error("Unable to decode the dataset")
-#         app_logger.exception(exc)
-#         # Unable to decode dataset
-#         return 0x210
-
-#     # Add the file meta information elements
-#     ds.file_meta = event.file_meta
-
-#     # Because pydicom uses deferred reads for its decoding, decoding errors
-#     #   are hidden until encountered by accessing a faulty element
-#     try:
-#         sop_class = ds.SOPClassUID
-#         sop_instance = ds.SOPInstanceUID
-#     except Exception as exc:
-#         app_logger.error(
-#             "Unable to decode the received dataset or missing 'SOP Class "
-#             "UID' and/or 'SOP Instance UID' elements"
-#         )
-#         app_logger.exception(exc)
-#         # Unable to decode dataset
-#         return 0xC210
-
-#     try:
-#         # Get the elements we need
-#         mode_prefix = SOP_CLASS_PREFIXES[sop_class][0]
-#     except KeyError:
-#         mode_prefix = 'UN'
-
-#     filename = f'{mode_prefix}.{sop_instance}'
-#     app_logger.info(f'Storing DICOM file: {filename}')    
-
-#     status_ds = Dataset()
-#     status_ds.Status = 0x0000
-
-#     # Try to save to output-directory
-#     if config['output']['directory'] is not None:
-#         filename = os.path.join(config['output']['directory'], filename)
-#         try:
-#             os.makedirs(config['output']['directory'], exist_ok=True)
-#         except Exception as exc:
-#             app_logger.error('Unable to create the output directory:')
-#             app_logger.error(f"    {config['output']['directory']}")
-#             app_logger.exception(exc)
-#             # Failed - Out of Resources - IOError
-#             status_ds.Status = 0xA700
-#             return status_ds
-
-#     if os.path.exists(filename):
-#         app_logger.warning('DICOM file already exists, overwriting')        
-        
-#     try:
-#         if event.context.transfer_syntax == DeflatedExplicitVRLittleEndian:
-#             # Workaround for pydicom issue #1086
-#             with open(filename, 'wb') as f:
-#                 f.write(b'\x00' * 128)
-#                 f.write(b'DICM')
-#                 f.write(write_file_meta_info(f, event.file_meta))
-#                 f.write(encode(ds, False, True, True))
-#         else:
-#             # We use `write_like_original=False` to ensure that a compliant
-#             #   File Meta Information Header is written
-#             ds.save_as(filename, write_like_original=False)
-
-#         status_ds.Status = 0x0000  # Success
-#     except IOError as exc:
-#         app_logger.error('Could not write file to specified directory:')
-#         app_logger.error(f"    {os.path.dirname(filename)}")
-#         app_logger.exception(exc)
-#         # Failed - Out of Resources - IOError
-#         status_ds.Status = 0xA700
-#     except Exception as exc:
-#         app_logger.error('Could not write file to specified directory:')
-#         app_logger.error(f"    {os.path.dirname(filename)}")
-#         app_logger.exception(exc)
-#         # Failed - Out of Resources - Miscellaneous error
-#         status_ds.Status = 0xA701
-
-#     return status_ds
-
-
-# def start_server(ae, config):
-
-    
-#     transfer_syntax = ALL_TRANSFER_SYNTAXES[:]
-#     store_handlers = [(evt.EVT_C_STORE, handle_store, [config, APP_LOGGER])]
-#     ae.ae_title = config['local']['aet']
-#     for cx in AllStoragePresentationContexts:
-#         ae.add_supported_context(cx.abstract_syntax, transfer_syntax)
-
-#     scp = ae.start_server(
-#         ('', config['local']['port']), block=False, evt_handlers=store_handlers
-#         )
-#     return scp
-
 
 class SCP(object):
     """ SCP class
@@ -163,11 +44,70 @@ class SCP(object):
 
     def __init__(self, config):
         self.config = config
+        self.anonymization_enabled = self.check_anon_engine()
         self.ae = self.create_ae() 
         self.scp = None
-        # self.anon_queue = Queue()
-        # self.start_anon_workers()
-        
+        self.writing_queue = Queue()
+        self.start_file_writing_workers()
+        self.file_count = 0
+        self.time_start =  time.time()
+
+    def check_anon_engine(self):
+        """
+        Return True if anonymization is enabled and script / look up table file exist
+        """
+        if (self.config['anonymization'] and self.config['anonymization']['enabled']):
+            # Anonymization enabled
+            # Ensure that RSNA DICOM Anonymizer is found
+            if not os.path.isfile('./DicomAnonymizerTool/DAT.jar'):
+                questions = [
+                inquirer.List('anon_files',
+                                message="RSNA DICOM Anonymizer JAR file not found. Do you still want to proceed?",
+                                choices=['Continue without anonymization', 'Exit'],
+                            ),
+                ]
+                answers = inquirer.prompt(questions)
+                if answers['anon_files'] == 'Exit':
+                    sys.exit()
+                else:
+                    print('Anonymization DISABLED')
+                    return False
+
+            # Ensure that anonymization scripts are found
+            anon_script = self.config['anonymization']['script']
+            anon_lut = self.config['anonymization']['lookup_table']
+            if not os.path.isfile(anon_script):
+                questions = [
+                inquirer.List('anon_files',
+                                message="Anonymization script not found. Do you still want to proceed?",
+                                choices=['Continue without anonymization', 'Exit'],
+                            ),
+                ]
+                answers = inquirer.prompt(questions)
+                if answers['anon_files'] == 'Exit':
+                    sys.exit()
+                else:
+                    print('Anonymization DISABLED')
+                    return False
+            
+            if not os.path.isfile(anon_lut):
+                questions = [
+                inquirer.List('anon_files',
+                                message="Anonymization look up table not found. Do you still want to proceed?",
+                                choices=['Continue without look up table', 'Exit'],
+                            ),
+                ]
+                answers = inquirer.prompt(questions)
+                if answers['anon_files'] == 'Exit':
+                    sys.exit()
+
+            print('Anonymization ENABLED')    
+            return True
+        else:
+            print('Anonymization DISABLED')
+            return False
+
+
     def create_ae(self):
         # Create application entity
         ae = AE(ae_title=self.config['local']['aet'])
@@ -189,34 +129,72 @@ class SCP(object):
 
         return ae
     
-    # def anon_cmd(file):
-    #     return 'java -jar ./DicomAnonymizerTool/DAT.jar -da {anon_script} -lut {anon_lut} -in {file} -out {file}'.format(
-    #         file = file, 
-    #         anon_script = self.config['output']['anonymization_script'],
-    #         anon_lut = self.config['output']['anonymization_lookup_table'])
+    def anon_cmd(self, file):
+        return 'cd ./DicomAnonymizerTool && java -jar DAT.jar -da {anon_script} -lut {anon_lut} -in {file} -out {file}  >/dev/null 2>&1'.format(
+            file = file, 
+            anon_script = self.config['anonymization']['script'],
+            anon_lut = self.config['anonymization']['lookup_table'])
 
-    # def anonymize_file(i, q):
-    #     while True:
-    #         filename = q.get()
-    #         os.system(self.anon_cmd(filename))
-    #         q.task_done()
+    def write_file(self, i, q):
+        while True:
+            tmp_filename, tmp_ds = q.get()
+            # Anonymize file if enabled
+            if self.anonymization_enabled:
+                os.system(self.anon_cmd(tmp_filename))
+                ds = dcmread(tmp_filename)
+            else:
+                ds = tmp_ds
+            # Apply decompression if enabled
+            if self.config['output']['decompress']:
+                ds.decompress()
+                ds.save_as(tmp_filename, write_like_original=False)
+            # Move file to desired directory_structure 
+            dir_structure = self.config['output']['directory_structure'].split('/')
+            dir_structure = [str(ds[ElementPath(x).tag].value) for x in dir_structure if x]
+            filename = str(ds[ElementPath(self.config['output']['filename']).tag].value) + '.dcm'
+            filedir = os.path.join(self.config['output']['directory'], *dir_structure)
+            filepath = os.path.join(filedir, filename)
+            os.makedirs(filedir, exist_ok = True)
+            shutil.move(tmp_filename, filepath)
+            q.task_done()
 
-    # def start_anon_workers():
-    #     self.anon_workers = []
-    #     for i in range(num_fetch_threads):
-    #         worker = Thread(target=self.anonymize_file, args=(i,self.anon_queue,))
-    #         worker.setDaemon(True)
-    #         worker.start()
-    #         self.anon_workers.append(worker)
+    def start_file_writing_workers(self):
+        self.file_writing_workers = []
+        for i in range(self.config['request']['threads']):
+            worker = Thread(target=self.write_file, args=(i,self.writing_queue,))
+            worker.setDaemon(True)
+            worker.start()
+            self.file_writing_workers.append(worker)
 
     def start_server(self):
-        print('Starting server')
+        print('Starting local storage SCP server on port {}'.format(self.config['local']['port']))
+        # Create a temporary directory to store files prior to anonymization
+        temp_dir = os.path.join(self.config['output']['directory'],'tmp')
+        os.makedirs(temp_dir, exist_ok = True)
         handlers = [(evt.EVT_C_STORE, self.handle_store), (evt.EVT_C_ECHO, self.handle_echo)]
         self.scp = self.ae.start_server(('', self.config['local']['port']), block=False, evt_handlers=handlers)
 
     def stop_server(self):
-        print('Stopping server')
+        old_qsize = self.writing_queue.qsize()
+        pbar = tqdm.tqdm(total=old_qsize, 
+            desc='Post-processing ', 
+            unit='files')
+        while self.writing_queue.qsize():
+            qsize = self.writing_queue.qsize()
+            pbar.update(old_qsize-qsize)
+            old_qsize = qsize
+            time.sleep(0.1)
+        pbar.update(old_qsize-self.writing_queue.qsize())
+        pbar.close()    
+        self.writing_queue.join()
+        time_elapsed = time. time() - self.time_start
+        print('Stopping local storage SCP server: {} files transferred in {:.1f} seconds ({:.2f} files/s)'.format(self.file_count, time_elapsed, self.file_count/time_elapsed))
         self.scp.shutdown()
+        temp_dir = os.path.join(self.config['output']['directory'],'tmp')
+        # Remove temporary directory if empty
+        if not os.listdir(temp_dir):
+            shutil.rmtree(temp_dir)
+
 
     def handle_echo(self, event):
         """Respond to a C-ECHO service request.
@@ -289,12 +267,7 @@ class SCP(object):
         except KeyError:
             mode_prefix = 'UN'
 
-        filename = os.path.join(self.config['output']['directory'],'{0!s}.dcm'.format(uuid.uuid4()))
-
-        APP_LOGGER.info('Storing DICOM file: {0!s}'.format(filename))
-
-        if os.path.exists(filename):
-            APP_LOGGER.warning('DICOM file already exists, overwriting')
+        filename = os.path.join(self.config['output']['directory'],'tmp/{0!s}.dcm'.format(uuid.uuid4()))
 
         # Presentation context
         cx = event.context
@@ -314,18 +287,13 @@ class SCP(object):
         
         try:
             ds.save_as(filename, write_like_original=False)
-
+            self.file_count += 1
+            self.writing_queue.put((filename, ds))
             status_ds.Status = 0x0000 # Success
         except IOError:
-            APP_LOGGER.error('Could not write file to specified directory:')
-            APP_LOGGER.error("    {0!s}".format(os.path.dirname(filename)))
-            APP_LOGGER.error('Directory may not exist or you may not have write '
-                        'permission')
             # Failed - Out of Resources - IOError
             status_ds.Status = 0xA700
         except:
-            APP_LOGGER.error('Could not write file to specified path:')
-            APP_LOGGER.error("    {0!s}".format(filename))
             # Failed - Out of Resources - Miscellaneous error
             status_ds.Status = 0xA701
 

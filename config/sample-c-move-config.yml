@@ -8,18 +8,22 @@ local:
 request:
   type: c-move
   model: patient
-  threads: 4
+  threads: 16
   throttle_time: 0.0
   elements_batch_file: /home/therlaup/DICOM-batch-export/config/sample-c-move-batch.csv
   elements:
     - StudyInstanceUID
     - SeriesInstanceUID
     - QueryRetrieveLevel=SERIES
+anonymization:
+  enabled: true
+  script: /home/therlaup/DICOM-batch-export/config/sample-dicom-anonymizer.script
+  lookup_table: /home/therlaup/DICOM-batch-export/config/sample-lookup-table.properties
 output:
-  anonymization_script: /home/therlaup/DICOM-batch-export/config/sample-dicom-anonymizer.script
-  anonymization_lookup_table: /home/therlaup/DICOM-batch-export/config/sample-lookup-table.properties
   directory: /home/therlaup/DICOM-batch-export/data
-  database_file: /home/therlaup/DICOM-batch-export/data/library.csv
-  directory_structure: PatientID/StudyInstanceUID/
+  database_file: /home/therlaup/DICOM-batch-export/data/database-c-move.csv
+  directory_structure: PatientID/StudyInstanceUID
+  filename: InstanceNumber
+  decompress: True
 
   
