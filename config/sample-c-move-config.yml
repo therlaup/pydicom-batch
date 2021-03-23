@@ -14,7 +14,11 @@ request:
   elements:
     - StudyInstanceUID
     - SeriesInstanceUID
-    - QueryRetrieveLevel=SERIES
+    - QueryRetrieveLevel=SERIES 
+schedule:
+  enabled: true
+  start_time: 6:00
+  end_time: 18:00
 anonymization:
   enabled: true
   script: /home/therlaup/DICOM-batch-export/config/sample-dicom-anonymizer.script

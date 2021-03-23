@@ -5,6 +5,9 @@ from pydicom.dataset import Dataset
 import os.path
 import csv
 import time
+import datetime
+import signal
+import threading
 import tqdm
 import concurrent.futures
 import numpy as np
@@ -35,6 +38,16 @@ from pynetdicom.sop_class import (
     PatientStudyOnlyQueryRetrieveInformationModelMove
 )
 
+continue_extraction = True
+
+def sigint_handler(signal, frame):
+    global continue_extraction
+    continue_extraction = False
+    raise KeyboardInterrupt
+
+def watch_sigint():
+    signal.signal(signal.SIGINT, sigint_handler)
+    
 
 class hashabledict(dict):
     def __hash__(self):
@@ -88,7 +101,7 @@ def create_dataset(request):
 
 def create_requests(config):
     requests = []
-    if config['request']['elements_batch_file']:
+    if 'elements_batch_file' in config['request']:
         if os.path.exists(config['request']['elements_batch_file']):
             with open(config['request']['elements_batch_file'], newline='') as csvfile:
                 reader = csv.DictReader(csvfile, dialect='excel')
@@ -183,7 +196,8 @@ def failed_requests(config):
             request['throttle_time'] = float(request['throttle_time'])
             request['threads'] = int(request['threads'])
     
-    os.remove(filepath_requests_failed)
+    if os.path.exists(filepath_requests_failed):
+        os.remove(filepath_requests_failed)
     
     return requests
 
@@ -213,19 +227,34 @@ def process_request_batch(config):
         requests = create_requests(config)
     
     if requests:
+        watch_sigint()
         split_requests = np.array_split(requests, config['request']['threads'])
+        print('To stop extraction, press CTRL-C. Extraction can be resumed at a later time.')
         pbar = tqdm.tqdm(total=len(requests), 
             desc='Sending {} requests '.format(config['request']['type']), 
             unit='rqst')
         fn = lambda x : thread_scu_function(config, pbar, x)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=config['request']['threads']) as executor:
-            executor.map(fn, split_requests)
+        if config['request']['threads'] > 1:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=config['request']['threads']) as executor:
+                executor.map(fn, split_requests)
+        else:
+            fn(split_requests[0])
         pbar.close()
     else:
         print('No further requests pending')
         
     
-
+def seconds_until(time_str):
+    """
+    Returns the number of seconds from now until the time in format HH:mm
+    """
+    list_time_str = time_str.split(':')
+    h = int(list_time_str[0])
+    m = int(list_time_str[1])
+    now = time.datetime.now()
+    return int((datetime.timedelta(hours=24) 
+        - (now - now.replace(hour=h, minute=m, second=0, microsecond=0)))
+        .total_seconds() % (24 * 3600))
 
 class SCU(object):
     """ SCU class
@@ -264,6 +293,23 @@ class SCU(object):
             ae_title=self.config['pacs']['aet'],
             max_pdu=16382)
 
+    def wait_until_scheduled_time(self):
+        pass
+        # if 'schedule' in self.config:
+        #     if self.config['schedule']['enabled']:
+        #         sec_until_start = seconds_until(self.config['schedule']['start_time'])
+        #         sec_until_end = seconds_until(self.config['schedule']['end_time'])
+        #         if sec_until_end > sec_until_start:
+        #             print('Extraction paused. Will resume at {}'.format(self.config['schedule']['start_time']))
+        #             if self.pbar:
+        #                 self.pbar.set_description('Extraction paused. Will resume at {}'.format(self.config['schedule']['start_time']))
+        #             time.sleep(sec_until_start)
+        #         else:
+        #             if self.pbar:
+        #                 self.pbar.set_description('Sending {} requests '.format(config['request']['type']))
+                    
+
+
     def retry_association(self):
 
         for i in range(100):
@@ -296,10 +342,14 @@ class SCU(object):
         return query_model
 
     def process_requests_batch(self, requests):
+        global continue_extraction
+
         self.association = self.establish_association()
         for request in requests:
-            self.process_request(request)
-            time.sleep(request['throttle_time'])
+            if continue_extraction:
+                self.wait_until_scheduled_time()
+                self.process_request(request)
+                time.sleep(request['throttle_time'])
         self.association.release()
         
     
