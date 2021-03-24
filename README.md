@@ -107,6 +107,8 @@ The types of operations that are allowed are called DICOM Message Service Elemen
 
 Extractions are defined in YAML files. We provide example files in the config directory. Note that paths for directories or files defined in configuration files should be absolute.
 
+The requests that are submitted must conform with [SOP Class Definitions](http://dicom.nema.org/dicom/2013/output/chtml/part04/sect_C.6.html).
+
 ### Sample C-FIND request
 
 The purpose of a C-FIND extraction is to generate a list of DICOM instances available on the PACS server based on defined criteria:
