@@ -148,9 +148,13 @@ output:
 
 The purpose of a C-MOVE extraction is to transfer DICOM instance to our local workstation.
 
-We provide configuration options for ananymization, scheduling and for output directory structure.
+We provide the following additional features:
+* Anonymization: If you would like the files to be automatically anonymized after transfer, you need to define an anonymization script. We use the [RSNA DICOM Anonymizer](https://mircwiki.rsna.org/index.php?title=The_CTP_DICOM_Anonymizer) for this purpose. This software allows you to also define a 'lookup table', which will map the value of a particular DICOM field to a correponding value after anonymization ([See the example](https://mircwiki.rsna.org/index.php?title=The_CTP_DICOM_Anonymizer#.40lookup.28ElementName.2CKeyType.29)).
+* Scheduling: If you want your extraction to run at a specific time of the day, so as not to interfere with the PACS server, you can set the `start_time` and `end_time` in 24 hour format HH:mm. The extraction will only proceed if the current time is between `start_time` and `end_time`. If executed outside of these hours, the script will wait until `start_time` to perform the extraction
+* Output directory structure: You may define the directory where DICOM files should be saved and you can define the structure of the subdirectories to be created based on DICOM keywords. For example, if we use the configuration file shown below, a DICOM file with PatientID = 0123, StudyInstanceUID = 1.25542.324524, and InstanceNumber = 1 would be stored at `/home/therlaup/DICOM-batch-export/data/0123/1.25542.324524/1.dcm`.
+* Resuming: You can stop the extraction by pressing CRTL+C at any point. The extraction can be resumed later by re-executing the script.
 
-
+This is an example C-MOVE configuration file:
 ```yaml
 pacs:
   hostname: 172.29.144.1
