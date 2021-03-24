@@ -105,7 +105,7 @@ The types of operations that are allowed are called DICOM Message Service Elemen
 
 ## <a name="config"></a> Extraction configuration files
 
-Extractions are defined in YAML files. We provide example files in the config directory. Note that path defined in configuration files should be absolute.
+Extractions are defined in YAML files. We provide example files in the config directory. Note that paths for directories or files defined in configuration files should be absolute.
 
 ### Sample C-FIND request
 
