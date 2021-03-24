@@ -3,7 +3,7 @@ This project provides python-based batch image export scripts from a PACS server
 
 The scripts are based on the Pydicom (https://github.com/pydicom/pydicom) and Pynetdicom (https://github.com/pydicom/pynetdicom).
 
-Extractions are defined in YAML configuration files and batches of requests are stored in CSV files. Examples are provided in the [configuration directory](config)
+Extractions are defined in YAML configuration files and batches of requests are stored in CSV files. Examples are provided in the [configuration directory](config). We provide some explanation [below](#config).
 
 There are two options available to run PYDICOM batch: (1) Docker container or (2) bare metal Anaconda. Both are supported but the docker-based approach may be simpler to use without affecting your base system. 
 
@@ -26,7 +26,7 @@ For installation instruction for Docker depending on your system see https://doc
 We have included a build script for the Docker container at ``bin/build-docker-container.sh``.
 
 ```bash
-cd DICOM-batch-export
+cd pydicom-batch
 ./bin/build-docker-container.sh
 ```
 
