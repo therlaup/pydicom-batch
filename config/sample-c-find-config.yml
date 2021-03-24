@@ -1,5 +1,5 @@
 pacs:
-  hostname: 172.20.112.1
+  hostname: 172.29.144.1
   port: 4242
   aet: ORTHANC
 local:
@@ -8,7 +8,7 @@ local:
 request:
   type: c-find
   model: patient
-  threads: 8
+  threads: 1
   throttle_time: 1.0
   elements_batch_file: /home/therlaup/DICOM-batch-export/config/sample-c-find-batch.csv
   elements:

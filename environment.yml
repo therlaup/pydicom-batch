@@ -14,3 +14,4 @@ dependencies:
   - pyyaml
   - tqdm
   - inquirer
+  - pytz

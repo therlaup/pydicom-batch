@@ -1,5 +1,5 @@
 pacs:
-  hostname: 172.20.112.1
+  hostname: 172.29.144.1
   port: 4242
   aet: ORTHANC
 local:
@@ -8,8 +8,8 @@ local:
 request:
   type: c-move
   model: patient
-  threads: 16
-  throttle_time: 0.0
+  threads: 1
+  throttle_time: 20.0
   elements_batch_file: /home/therlaup/DICOM-batch-export/config/sample-c-move-batch.csv
   elements:
     - StudyInstanceUID
@@ -17,8 +17,9 @@ request:
     - QueryRetrieveLevel=SERIES 
 schedule:
   enabled: true
-  start_time: 6:00
-  end_time: 18:00
+  start_time: '17:13'
+  end_time: '17:15'
+  timezone: America/New_York
 anonymization:
   enabled: true
   script: /home/therlaup/DICOM-batch-export/config/sample-dicom-anonymizer.script

@@ -1,4 +1,4 @@
-from pynetdicom import AE
+from pynetdicom import AE, evt
 from pynetdicom.sop_class import VerificationSOPClass
 from pynetdicom.apps.common import ElementPath
 from pydicom.dataset import Dataset
@@ -6,6 +6,7 @@ import os.path
 import csv
 import time
 import datetime
+import pytz
 import signal
 import threading
 import tqdm
@@ -44,6 +45,7 @@ def sigint_handler(signal, frame):
     global continue_extraction
     continue_extraction = False
     raise KeyboardInterrupt
+    print('Stopping extraction')
 
 def watch_sigint():
     signal.signal(signal.SIGINT, sigint_handler)
@@ -244,14 +246,18 @@ def process_request_batch(config):
         print('No further requests pending')
         
     
-def seconds_until(time_str):
+def seconds_until(time_str, tzname):
     """
     Returns the number of seconds from now until the time in format HH:mm
     """
+    
     list_time_str = time_str.split(':')
+    
+
     h = int(list_time_str[0])
     m = int(list_time_str[1])
-    now = time.datetime.now()
+    tz = pytz.timezone(tzname)
+    now = datetime.datetime.now(tz=tz)
     return int((datetime.timedelta(hours=24) 
         - (now - now.replace(hour=h, minute=m, second=0, microsecond=0)))
         .total_seconds() % (24 * 3600))
@@ -294,27 +300,27 @@ class SCU(object):
             max_pdu=16382)
 
     def wait_until_scheduled_time(self):
-        pass
-        # if 'schedule' in self.config:
-        #     if self.config['schedule']['enabled']:
-        #         sec_until_start = seconds_until(self.config['schedule']['start_time'])
-        #         sec_until_end = seconds_until(self.config['schedule']['end_time'])
-        #         if sec_until_end > sec_until_start:
-        #             print('Extraction paused. Will resume at {}'.format(self.config['schedule']['start_time']))
-        #             if self.pbar:
-        #                 self.pbar.set_description('Extraction paused. Will resume at {}'.format(self.config['schedule']['start_time']))
-        #             time.sleep(sec_until_start)
-        #         else:
-        #             if self.pbar:
-        #                 self.pbar.set_description('Sending {} requests '.format(config['request']['type']))
+        
+        if 'schedule' in self.config:
+            if self.config['schedule']['enabled']:
+                sec_until_start = seconds_until(self.config['schedule']['start_time'], self.config['schedule']['timezone'])
+                sec_until_end = seconds_until(self.config['schedule']['end_time'], self.config['schedule']['timezone'])
+    
+                if sec_until_end > sec_until_start:
+                    if self.pbar:
+                        self.pbar.set_description('Extraction PAUSED (will resume at {})'.format(self.config['schedule']['start_time']))
+                    time.sleep(sec_until_start)
+                else:
+                    if self.pbar:
+                        self.pbar.set_description('Sending {} requests (will pause at {})'.format(self.config['request']['type'], self.config['schedule']['end_time']))
                     
-
 
     def retry_association(self):
 
         for i in range(100):
             if not self.association.is_established:
                 time.sleep(1)
+                print('Re-trying association')
                 self.association = self.establish_association()
             else:
                 return
