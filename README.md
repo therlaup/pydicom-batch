@@ -146,6 +146,8 @@ output:
   directory_structure: PatientID/StudyInstanceUID/  # Directory structure generated in the output directory
 ```
 
+For a list of supported elements in C-FIND requests, see [Tables F.4.2-16 and F.4.2-17](http://dicom.nema.org/medical/dicom/current/output/chtml/part02/sect_F.4.2.2.4.html).
+
 ### Sample C-MOVE request
 
 The purpose of a C-MOVE extraction is to transfer DICOM instance to our local workstation.
@@ -155,6 +157,8 @@ We provide the following additional features:
 * Scheduling: If you want your extraction to run at a specific time of the day, so as not to interfere with the PACS server, you can set the `start_time` and `end_time` in 24 hour format HH:mm. The extraction will only proceed if the current time is between `start_time` and `end_time`. If executed outside of these hours, the script will wait until `start_time` to perform the extraction. The example configuration below would result in requests being sent between 5:13pm and 5:15pm.
 * Output directory structure: You may define the directory where DICOM files should be saved and you can define the structure of the subdirectories to be created based on DICOM keywords. For example, if we use the configuration file shown below, a DICOM file with PatientID = 0123, StudyInstanceUID = 1.25542.324524, and InstanceNumber = 1 would be stored at `/home/therlaup/DICOM-batch-export/data/0123/1.25542.324524/1.dcm`.
 * Resuming: You can stop the extraction by pressing CRTL+C at any point. The extraction can be resumed later by re-executing the script.
+* Multithreading: the `threads` option allows you to set the number of concurrent requests to be sent to the server simultaneously. This can result in speedup when queries are slow on the PACS server side.
+* Throttling: You can set the `throttle_time` as a period of time to wait after a request is completed and the next request is sent.
 
 This is an example C-MOVE configuration file:
 ```yaml
@@ -167,7 +171,7 @@ local:
   aet: SAMPLE_AE
 request:
   type: c-move
-  model: patient
+  model: study
   threads: 1
   throttle_time: 0.0
   elements_batch_file: /home/therlaup/DICOM-batch-export/config/sample-c-move-batch.csv
@@ -190,4 +194,46 @@ output:
   directory_structure: PatientID/StudyInstanceUID
   filename: InstanceNumber
   decompress: True
+```
+
+This is an example C-MOVE `elements_batch_file` file:
+```csv
+StudyInstanceUID,SeriesInstanceUID
+1.3.12.2.1107.5.1.4.74056.30000020022112215596500000011,1.3.12.2.1107.5.1.4.74056.30000020022112115594300019976
+9999.18454941609411743121890643189289988236,9999.267578297285244600187961647796815588799
+9999.281338081684468596962661336314848763651,9999.93521057461304316454481637712550958283
+9999.232073054342995893230412137058269216200,9999.222820459245012064120811199215165750097
+9999.227813638204657158652564805142341210352,9999.284683548767989554990456389548658291382
+9999.227813638204657158652564805142341210352,9999.195058520922019972418950596167791539890
+9999.18454941609411743121890643189289988236,9999.130267819095510079326640214782187359464
+9999.232073054342995893230412137058269216200,9999.14334127089821417355904566036058726344
+1.3.12.2.1107.5.4.3.4975316777216.19951114.94101.16,1.3.12.2.1107.5.4.3.4975316777216.19951114.94101.17
+```
+
+The `elements_batch_file` is a CSV file with the first row defining DICOM element keywords or tags in format `(xxxx,xxxx)`. Each subsequent row in the file will result in a separate request to be sent to the server with the keyword being set to the value on that row. In the following example, the first request sent to the server will be the following:
+```
+QueryRetrieveLevel=SERIES
+StudyInstanceUID=1.3.12.2.1107.5.1.4.74056.30000020022112215596500000011
+SeriesInstanceUID=1.3.12.2.1107.5.1.4.74056.30000020022112115594300019976
+```
+
+Note that C-MOVE request have secific fields that are required depending on the `QueryRetrieveLevel` used. The above example will move all DICOM instance contained in series matching the request. The available `QueryRetrieveLevel` are STUDY, SERIES or IMAGE. A valid C-MOVE request needs to include the following:
+
+* Query/Retrieve Level (0008,0052), which defines the level of the retrieval
+* Unique Key Attributes, which may include Patient ID (0010,0020), Study Instance UIDs (0020,000D), Series Instance UIDs (0020,000E), and the SOP Instance UIDs (0008,0018)
+
+The hierarchy goes STUDY -> SERIES -> IMAGE. If you want to transfer all images contained in a series, you need to specify `StudyInstanceUID` and `SeriesInstanceUID`.
+
+The script can be executed as follow:
+```bash
+~/pydicom-batch$ ./bin/run-docker-extraction.sh ./config/sample-c-move-config.yml 
+
+█▀█ █▄█ █▀▄ █ █▀▀ █▀█ █▀▄▀█   █▄▄ ▄▀█ ▀█▀ █▀▀ █░█
+█▀▀ ░█░ █▄▀ █ █▄▄ █▄█ █░▀░█   █▄█ █▀█ ░█░ █▄▄ █▀█
+
+Running extraction defined in:  /home/therlaup/DICOM-batch-export/config/sample-c-move-config.yml
+Anonymization ENABLED
+Starting local storage SCP server on port 4000
+To stop extraction, press CTRL-C. Extraction can be resumed at a later time.
+Sending c-move requests : 100%|██████████████████████████████████████████████████████████████████| 9/9 [00:08<00:00,  1.12rqst/s]
 ```
