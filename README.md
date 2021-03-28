@@ -217,7 +217,7 @@ StudyInstanceUID=1.3.12.2.1107.5.1.4.74056.30000020022112215596500000011
 SeriesInstanceUID=1.3.12.2.1107.5.1.4.74056.30000020022112115594300019976
 ```
 
-Note that C-MOVE request have secific fields that are required depending on the `QueryRetrieveLevel` used. The above example will move all DICOM instance contained in series matching the request. The available `QueryRetrieveLevel` are STUDY, SERIES or IMAGE. A valid C-MOVE request needs to include the following:
+Note that C-MOVE requests have secific fields that are required depending on the `QueryRetrieveLevel` used. The above example will move all DICOM instance contained in series matching the request. The available `QueryRetrieveLevel` are STUDY, SERIES or IMAGE. A valid C-MOVE request needs to include the following:
 
 * Query/Retrieve Level (0008,0052), which defines the level of the retrieval
 * Unique Key Attributes, which may include Patient ID (0010,0020), Study Instance UIDs (0020,000D), Series Instance UIDs (0020,000E), and the SOP Instance UIDs (0008,0018)
@@ -225,7 +225,7 @@ Note that C-MOVE request have secific fields that are required depending on the 
 The hierarchy goes STUDY -> SERIES -> IMAGE. If you want to transfer all images contained in a series, you need to specify `StudyInstanceUID` and `SeriesInstanceUID`.
 
 The script can be executed as follow:
-```bash
+```
 ~/pydicom-batch$ ./bin/run-docker-extraction.sh ./config/sample-c-move-config.yml 
 
 █▀█ █▄█ █▀▄ █ █▀▀ █▀█ █▀▄▀█   █▄▄ ▄▀█ ▀█▀ █▀▀ █░█
