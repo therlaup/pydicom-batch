@@ -1,10 +1,10 @@
 pacs:
-  hostname: 10.242.177.210
-  port: 5000
-  aet: ALI_QUERY_SCP
+  hostname: 172.29.144.1
+  port: 4242
+  aet: ORTHANC
 local:
-  port: 11112
-  aet: PASCAL_AE
+  port: 4000
+  aet: SAMPLE_AE
 request:
   type: c-find
   model: patient
