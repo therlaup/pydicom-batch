@@ -127,19 +127,18 @@ request:
   elements_batch_file: ./config/sample_batch.csv # File path of the batch of elements ot process. If omitted, a single c-find is processed.
   elements:                         # Elements common to the entire batch in format 'keyword=value', 
                                     # these elements will be included in the output data of a c-find
-    - PatientID=02004950
+    - PatientID
     - PatientName
-    - Date
+    - PatientSex
     - StudyTime
     - StudyDate
     - AccessionNumber
     - StudyInstanceUID
-    - QueryRetrieveLevel=SERIES
-    - ModalitiesInStudy
+    - QueryRetrieveLevel=STUDY
+    - (0008,0061)
     - (0020,1208)
     - (0020,1206)
     - (0008,1030)
-    - (0008,103E)
 output:
   library_file: library.csv         # File path to the CSV file storing the results of c-find requests
   directory: ./data/dicom           # Directoty in which to store DICOM files transfered using c-move 
@@ -200,20 +199,22 @@ output:
 This is an example C-MOVE `elements_batch_file` file:
 ```csv
 StudyInstanceUID,SeriesInstanceUID
-1.3.12.2.1107.5.1.4.74056.30000020022112215596500000011,1.3.12.2.1107.5.1.4.74056.30000020022112115594300019976
-9999.18454941609411743121890643189289988236,9999.267578297285244600187961647796815588799
-9999.281338081684468596962661336314848763651,9999.93521057461304316454481637712550958283
-9999.232073054342995893230412137058269216200,9999.222820459245012064120811199215165750097
-9999.227813638204657158652564805142341210352,9999.284683548767989554990456389548658291382
-9999.227813638204657158652564805142341210352,9999.195058520922019972418950596167791539890
-9999.18454941609411743121890643189289988236,9999.130267819095510079326640214782187359464
-9999.232073054342995893230412137058269216200,9999.14334127089821417355904566036058726344
-1.3.12.2.1107.5.4.3.4975316777216.19951114.94101.16,1.3.12.2.1107.5.4.3.4975316777216.19951114.94101.17
+PatientID,StudyInstanceUID,SeriesInstanceUID
+00000001,1.3.12.2.1107.5.1.4.74056.30000020022112215596500000011,1.3.12.2.1107.5.1.4.74056.30000020022112115594300019976
+00000001,9999.18454941609411743121890643189289988236,9999.267578297285244600187961647796815588799
+00000001,9999.281338081684468596962661336314848763651,9999.93521057461304316454481637712550958283
+00000001,9999.232073054342995893230412137058269216200,9999.222820459245012064120811199215165750097
+00000001,9999.227813638204657158652564805142341210352,9999.284683548767989554990456389548658291382
+00000001,9999.227813638204657158652564805142341210352,9999.195058520922019972418950596167791539890
+00000001,9999.18454941609411743121890643189289988236,9999.130267819095510079326640214782187359464
+00000001,9999.232073054342995893230412137058269216200,9999.14334127089821417355904566036058726344
+00000002,1.3.12.2.1107.5.4.3.4975316777216.19951114.94101.16,1.3.12.2.1107.5.4.3.4975316777216.19951114.94101.17
 ```
 
 The `elements_batch_file` is a CSV file with the first row defining DICOM element keywords or tags in format `(xxxx,xxxx)`. Each subsequent row in the file will result in a separate request to be sent to the server with the keyword being set to the value on that row. In the following example, the first request sent to the server will be the following:
 ```
 QueryRetrieveLevel=SERIES
+PatientID=00000001
 StudyInstanceUID=1.3.12.2.1107.5.1.4.74056.30000020022112215596500000011
 SeriesInstanceUID=1.3.12.2.1107.5.1.4.74056.30000020022112115594300019976
 ```
@@ -223,7 +224,7 @@ Note that C-MOVE requests have secific fields that are required depending on the
 * Query/Retrieve Level (0008,0052), which defines the level of the retrieval
 * Unique Key Attributes, which may include Patient ID (0010,0020), Study Instance UIDs (0020,000D), Series Instance UIDs (0020,000E), and the SOP Instance UIDs (0008,0018)
 
-The hierarchy goes STUDY -> SERIES -> IMAGE. If you want to transfer all images contained in a series, you need to specify `StudyInstanceUID` and `SeriesInstanceUID`.
+The hierarchy goes STUDY -> SERIES -> IMAGE. If you want to transfer all images contained in a series, you need to specify `PatientID`, `StudyInstanceUID` and `SeriesInstanceUID`.
 
 The script can be executed as follow:
 ```
