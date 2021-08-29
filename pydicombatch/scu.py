@@ -14,6 +14,7 @@ import concurrent.futures
 import numpy as np
 import inquirer
 import ast
+import sys
 
 from pydicom.uid import (
     ExplicitVRLittleEndian, ImplicitVRLittleEndian, ExplicitVRBigEndian,
@@ -380,21 +381,28 @@ class SCU(object):
             responses = self.association.send_c_find(identifier, self.query_model)
                     
             for (status, rsp_identifier) in responses:
-
-                if status and status.Status in [0xFF00, 0xFF01]:
-                    # Status pending
-                    path = os.path.join(self.config['output']['directory'], self.config['output']['database_file'])
-                    dataset_to_csv(rsp_identifier, path, keywords)
-                else:
-                    if self.pbar:
-                        self.pbar.update(1)
-                    # Status Success, Warning, Cancel, Failure
-                    if status.Status in [0x0000]:
-                        filepath_requests_completed = os.path.join(self.config['output']['directory'], 'requests.completed')
-                        dict_to_csv(request, filepath_requests_completed, request.keys())
+                if 'Status' in status:
+                    
+                    if status and status.Status in [0xFF00, 0xFF01]:
+                        # Status pending
+                        path = os.path.join(self.config['output']['directory'], self.config['output']['database_file'])
+                        dataset_to_csv(rsp_identifier, path, keywords)
                     else:
-                        filepath_requests_failed = os.path.join(self.config['output']['directory'], 'requests.failed')
-                        dict_to_csv(request, filepath_requests_failed, request.keys())
+                        if self.pbar:
+                            self.pbar.update(1)
+                        if hasattr(status, 'Status'):
+                            identifier.Status = hex(status.Status)
+                        else:
+                            identifier.Status = 'timeout'
+                        # Status Success, Warning, Cancel, Failure
+                        if identifier.Status in [hex(0x0000)]:
+                            filepath_requests_completed = os.path.join(self.config['output']['directory'], 'requests.completed')
+                            dict_to_csv(request, filepath_requests_completed, request.keys())
+                        else:
+                            print('Failed with code ', hex(status.Status))
+                            filepath_requests_failed = os.path.join(self.config['output']['directory'], 'requests.failed')
+                            dict_to_csv(request, filepath_requests_failed, request.keys())
+
                 
                     
 
@@ -409,7 +417,7 @@ class SCU(object):
         
         if self.association.is_established:
             responses = self.association.send_c_move(identifier, self.config['local']['aet'], self.query_model)
-                   
+
             for (status, rsp_identifier) in responses:
                 
                 if status and status.Status in [0xFF00]:
@@ -419,12 +427,15 @@ class SCU(object):
                     # Status Success, Warning, Cancel, Failure
                     if self.pbar:
                         self.pbar.update(1)
-                    identifier.Status = hex(status.Status)
+                    if hasattr(status, 'Status'):
+                        identifier.Status = hex(status.Status)
+                    else:
+                        identifier.Status = 'timeout'
                     keywords.append('Status')
                     path = os.path.join(self.config['output']['directory'], self.config['output']['database_file'])
                     dataset_to_csv(identifier, path, keywords)
                     
-                    if status.Status in [0x0000]:
+                    if identifier.Status in [hex(0x0000)]:
                         filepath_requests_completed = os.path.join(self.config['output']['directory'], 'requests.completed')
                         dict_to_csv(request, filepath_requests_completed, request.keys())
                     else:

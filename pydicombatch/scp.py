@@ -17,7 +17,7 @@ from pydicom.uid import (
     ExplicitVRBigEndian,
     DeflatedExplicitVRLittleEndian,
     PILSupportedCompressedPixelTransferSyntaxes,
-    JPEGLossless
+    JPEGLosslessSV1
 )
 
 from pynetdicom import (

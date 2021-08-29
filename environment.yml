@@ -6,7 +6,7 @@ channels:
   
 dependencies:
   - nomkl
-  - pydicom 
+  - pydicom=2.1.0
   - pynetdicom
   - gdcm 
   - pillow

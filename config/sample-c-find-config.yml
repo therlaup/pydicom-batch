@@ -1,36 +1,34 @@
 pacs:
-  hostname: 172.29.144.1
-  port: 4242
-  aet: ORTHANC
+  hostname: 10.242.177.210
+  port: 5000
+  aet: ALI_QUERY_SCP
 local:
-  port: 4000
-  aet: SAMPLE_AE
+  port: 11112
+  aet: PASCAL_AE
 request:
   type: c-find
   model: patient
   threads: 1
-  throttle_time: 1.0
-  elements_batch_file: /home/therlaup/DICOM-batch-export/config/sample-c-find-batch.csv
+  throttle_time: 0.0
+  elements_batch_file: /home/pascal/pydicom-batch/config/sample-c-find-batch.csv
   elements:
-    - PatientID=02004950
+    - PatientID
     - PatientName
-    - Date
+    - PatientSex
     - StudyTime
     - StudyDate
     - AccessionNumber
     - StudyInstanceUID
-    - SeriesInstanceUID
-    - QueryRetrieveLevel=SERIES
-    - Modality
+    - QueryRetrieveLevel=STUDY
+    - (0008,0061)
     - (0020,1208)
     - (0020,1206)
     - (0008,1030)
-    - (0008,103E)
 output:
-  anonymization_script: /home/therlaup/DICOM-batch-export/config/sample-dicom-anonymizer.script
-  anonymization_lookup_table: /home/therlaup/DICOM-batch-export/config/sample-lookup-table.properties
-  directory: /home/therlaup/DICOM-batch-export/data
-  database_file: /home/therlaup/DICOM-batch-export/data/database-c-find.csv
+  anonymization_script: /home/pascal/pydicom-batch/config/sample-dicom-anonymizer.script
+  anonymization_lookup_table: /home/pascal/pydicom-batch/config/sample-lookup-table.properties
+  directory: /home/pascal/pydicom-batch/data
+  database_file: /home/pascal/pydicom-batch/data/database-c-find.csv
   directory_structure: PatientID/StudyInstanceUID/
 
   

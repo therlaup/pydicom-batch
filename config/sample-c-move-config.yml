@@ -8,10 +8,11 @@ local:
 request:
   type: c-move
   model: patient
-  threads: 1
+  threads: 8
   throttle_time: 0.0
   elements_batch_file: /home/therlaup/DICOM-batch-export/config/sample-c-move-batch.csv
   elements:
+    - PatientID
     - StudyInstanceUID
     - SeriesInstanceUID
     - QueryRetrieveLevel=SERIES 

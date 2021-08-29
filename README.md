@@ -176,6 +176,7 @@ request:
   throttle_time: 0.0
   elements_batch_file: /home/therlaup/DICOM-batch-export/config/sample-c-move-batch.csv
   elements:
+    - PatientID
     - StudyInstanceUID
     - SeriesInstanceUID
     - QueryRetrieveLevel=SERIES 
