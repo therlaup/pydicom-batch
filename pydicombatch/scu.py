@@ -86,10 +86,13 @@ def dict_to_csv(write_dict, filepath, fieldnames):
             writer.writerow(write_dict)
 
 def add_element_to_list(element_list, key, value):
-    if [x if ((x.partition('=')[0] == key) or (x == key)) else None for x in element_list]:
-        return [f'{key}={value}' if ((x.partition('=')[0] == key) or (x == key)) else x for x in element_list]
+    match_elements = [x if ((x.partition('=')[0] == key) or (x == key)) else None for x in element_list]
+    if match_elements.count(None) != len(match_elements):
+        theVal = [f'{key}={value}' if ((x.partition('=')[0] == key) or (x == key)) else x for x in element_list]
+        return theVal
     else:
-        element_list.append(f'{key}={value}')
+        theVal = f'{key}={value}'
+        element_list.append(theVal)
         return element_list
 
 def create_dataset(request):
